@@ -641,7 +641,6 @@ arm_plan_c() {
     header "ARM方案C: Box64+Wine"
     # FIX-25: 编译依赖和Wine按PKG_MGR分支
     if [[ "$PKG_MGR" == "apt" ]]; then
-        $SUDO apt-get update -qq || true
         $SUDO apt-get install -y -qq build-essential cmake git || { err "编译依赖安装失败"; return 1; }
     else
         $SUDO yum install -y gcc gcc-c++ make cmake git wget || { err "编译依赖安装失败"; return 1; }
@@ -837,7 +836,7 @@ x86_plan_c() {
     $SUDO ln -sf /opt/seamonkey/seamonkey /usr/local/bin/seamonkey
     # 防止自动升级到2.53+导致NPAPI丢失（2.49.5默认配置app.update.enabled=false一般关闭，但此处再加固）
     PROFILE_BASE="${HOME}/.mozilla/seamonkey"
-    [[ -d "$PROFILE_BASE" ]] && find "$PROFILE_BASE" -maxdepth 2 -name "user.js" -o -name "prefs.js" 2>/dev/null | while read -r f; do
+    [[ -d "$PROFILE_BASE" ]] && find "$PROFILE_BASE" -maxdepth 2 \( -name "user.js" -o -name "prefs.js" \) 2>/dev/null | while read -r f; do
         grep -q "app.update.enabled" "$f" 2>/dev/null || echo 'user_pref("app.update.enabled", false);' > "$f"
     done
     install_java
@@ -935,5 +934,4 @@ main() {
     echo -e "  ${YELLOW}- Oracle JRE 7/8 需通过 ControlPanel 添加EBS站点例外${NC}"
     echo ""
 }
-
 main "$@"
