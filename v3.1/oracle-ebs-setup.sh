@@ -605,7 +605,7 @@ arm_plan_b() {
     fi
 
     $SUDO mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
-    echo ':qemu-x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-x86_64-static:' | $SUDO tee /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
+    echo ':qemu-x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-x86_64-static:' | $SUDO tee /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
 
     CHROOT_DIR="${WORK_DIR}/chroot"
     $SUDO mkdir -p "$CHROOT_DIR"
@@ -641,6 +641,7 @@ arm_plan_c() {
     header "ARM方案C: Box64+Wine"
     # FIX-25: 编译依赖和Wine按PKG_MGR分支
     if [[ "$PKG_MGR" == "apt" ]]; then
+        $SUDO apt-get update -qq || true
         $SUDO apt-get install -y -qq build-essential cmake git || { err "编译依赖安装失败"; return 1; }
     else
         $SUDO yum install -y gcc gcc-c++ make cmake git wget || { err "编译依赖安装失败"; return 1; }
