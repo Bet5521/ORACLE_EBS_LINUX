@@ -1,24 +1,12 @@
 #!/bin/bash
 #===============================================================================
 # Oracle EBS 信创兼容方案 - 一键配置脚本
-# 版本: V3.1 (统一版，在V3.0基础上修复16项问题)
+# 版本: V3.2
 # 日期: 2026-08-30
 # 用途: 在ARM64/X86/C86 + 统信/麒麟系统上运行Oracle EBS
 # Java: 支持Oracle JRE 6u7/7/8 + OpenJDK 8 + IcedTea (自动安装)
 # 架构: 自动检测ARM64/X86/C86，切换对应方案
 # 作者: KTT
-# 合并: v1.1(Oracle JRE) + v2.2(OpenJDK 8+IcedTea) → 统一单文件 (V3.0)
-# 修复: FIX-1~10 继承自v1.1/v2.2 (日志/Firefox52/sudo/IS_64BIT/错误恢复/PKG_MGR/IcedTea)
-#       FIX-11~26 V3.1新增:
-#         FIX-11 JRE .bin绝对路径执行错误    FIX-12 JRE6u7解压目录嵌套
-#         FIX-13 启动脚本export展开顺序      FIX-14 deployment.properties文件名
-#         FIX-15 sudo下HOME=/root站点例外错位 FIX-16 sudo模式WORK_DIR写入权限
-#         FIX-17 SeaMonkey下载404            FIX-18 Pale Moon镜像失效→官网US/EU镜像
-#         FIX-19 os-release缺VERSION_ID崩溃  FIX-20 apt-get update失败崩溃
-#         FIX-21 IcedTea插件缺失不中断       FIX-22 VM/chroot/Docker内浏览器指引
-#         FIX-23 浏览器检测补全              FIX-24 VM内存自适应
-#         FIX-25 Box64/Wine按PKG_MGR分支
-#         FIX-26 SeaMonkey 2.53.18已移除所有NPAPI(Java不工作)→降级至2.49.5(最后支持Java NPAPI)
 #===============================================================================
 
 set -euo pipefail
@@ -34,17 +22,17 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # ==================== 全局变量 ====================
-SCRIPT_VERSION="3.1"
+SCRIPT_VERSION="3.2"
 LOG_FILE="/var/log/oracle-ebs.log"
 WORK_DIR="/opt/oracle-ebs"
 SUDO=""
 PKG_MGR="apt"
 
 # ==================== 工具函数 ====================
-log()   { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null; }
-warn()  { echo -e "${YELLOW}[警告]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null; }
-err()   { echo -e "${RED}[错误]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null; }
-info()  { echo -e "${BLUE}[信息]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null; }
+log()   { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null || true; }
+warn()  { echo -e "${YELLOW}[警告]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null || true; }
+err()   { echo -e "${RED}[错误]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null || true; }
+info()  { echo -e "${BLUE}[信息]${NC} $1" | $SUDO tee -a "$LOG_FILE" 2>/dev/null || true; }
 header(){ echo -e "\n${CYAN}${BOLD}══════════════════════════════════════════════════${NC}"; echo -e "${CYAN}${BOLD}  $1${NC}"; echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════${NC}\n"; }
 
 # ==================== 权限检查 ====================
@@ -53,13 +41,17 @@ check_root() {
     if [[ $EUID -ne 0 ]]; then
         if command -v sudo &>/dev/null; then
             if sudo -n true 2>/dev/null; then
-                log "检测到sudo权限，将以sudo模式运行"
+                log "检测到免密sudo权限，将以sudo模式运行"
                 SUDO="sudo"
+            elif sudo -v 2>/dev/null; then
+                # FIX-34: 用户有sudo权限但需要输入密码，引导用sudo重新运行
+                err "当前用户有sudo权限但需要输入密码"
+                err "请使用以下方式重新运行（会提示输入密码）："
+                err "  sudo bash $0"
+                exit 1
             else
-                err "需要root权限或sudo权限才能执行此脚本"
-                err "请使用以下方式之一运行："
-                err "  1. sudo bash $0"
-                err "  2. su -c 'bash $0'"
+                err "当前用户无sudo权限，请以root身份执行："
+                err "  su -c 'bash $0'"
                 exit 1
             fi
         else
@@ -460,11 +452,12 @@ configure_java_control_panel() {
 
     # FIX-15: sudo运行时$HOME为/root，必须定位真实桌面用户的家目录
     REAL_USER="${SUDO_USER:-$(id -un)}"
+    REAL_USER="${REAL_USER:-root}"
     if [[ "$REAL_USER" == "root" ]]; then
         USER_HOME="$HOME"
     else
-        USER_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6)
-        [[ -z "$USER_HOME" ]] && USER_HOME="$HOME"
+        USER_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6 || true)
+        USER_HOME="${USER_HOME:-$HOME}"
     fi
     if [[ "${JAVA_TYPE:-oracle}" == "openjdk" ]]; then
         info "IcedTea-Web通常无需站点例外，如遇安全提示可同样配置"
@@ -837,9 +830,14 @@ x86_plan_c() {
     $SUDO ln -sf /opt/seamonkey/seamonkey /usr/local/bin/seamonkey
     # 防止自动升级到2.53+导致NPAPI丢失（2.49.5默认配置app.update.enabled=false一般关闭，但此处再加固）
     PROFILE_BASE="${HOME}/.mozilla/seamonkey"
-    [[ -d "$PROFILE_BASE" ]] && find "$PROFILE_BASE" -maxdepth 2 \( -name "user.js" -o -name "prefs.js" \) 2>/dev/null | while read -r f; do
-        grep -q "app.update.enabled" "$f" 2>/dev/null || echo 'user_pref("app.update.enabled", false);' > "$f"
-    done
+    if [[ -d "$PROFILE_BASE" ]]; then
+        # FIX-27: find管道在set -e下若无匹配文件返回1会导致脚本退出；用进程替换避免管道子shell陷阱
+        while read -r f; do
+            if ! grep -q "app.update.enabled" "$f" 2>/dev/null; then
+                echo 'user_pref("app.update.enabled", false);' >> "$f"
+            fi
+        done < <(find "$PROFILE_BASE" -maxdepth 2 \( -name "user.js" -o -name "prefs.js" \) 2>/dev/null || true)
+    fi
     install_java
     configure_java_control_panel
 
@@ -871,7 +869,7 @@ x86_plan_d() {
 
 # ==================== 主流程 ====================
 main() {
-    clear
+    clear 2>/dev/null || true
     echo -e "${CYAN}${BOLD}"
     echo "  ╔═══════════════════════════════════════════════════════════╗"
     echo "  ║       Oracle EBS 信创兼容方案 - 一键配置脚本 V${SCRIPT_VERSION}       ║"
@@ -886,7 +884,12 @@ main() {
     $SUDO mkdir -p "$WORK_DIR"
     $SUDO chmod 755 "$WORK_DIR"
     # FIX-16: sudo模式下将WORK_DIR归属当前用户，否则后续cat >写入会被拒(set -e崩溃)
-    $SUDO chown "$(id -u):$(id -g)" "$WORK_DIR" 2>/dev/null || true
+    CURRENT_USER="$(id -un)"
+    if [[ "$CURRENT_USER" == "root" && -n "${SUDO_USER:-}" ]]; then
+        $SUDO chown "${SUDO_USER}:" "$WORK_DIR" 2>/dev/null || true
+    else
+        $SUDO chown "$(id -u):$(id -g)" "$WORK_DIR" 2>/dev/null || true
+    fi
 
     show_plans
 
